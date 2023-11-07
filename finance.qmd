@@ -129,7 +129,7 @@ loan |>
 loan_counts <- ggplot(loan, aes(x=status)) + geom_bar()
 ```
 
-## METHOD 1
+METHOD 1
 ```{r}
 loan_amounts <-
   loan |> 
@@ -145,8 +145,136 @@ loan_counts + loan_amounts
 ```{r}
 print((loan_counts + coord_flip()) / (loan_amounts + coord_flip()))
 ```
-## METHOD 2
-```{r}
 
+```{r}
+(loan |> 
+  filter(status %in% c("A","B")) |> 
+  ggplot(aes(x=status)) + 
+   geom_bar()) + 
+  ggtitle("Past loans") +
+  (loan |> 
+  filter(status %in% c("C","D")) |> 
+  ggplot(aes(x=status)) + 
+      geom_bar()) +
+  labs(title = "Ongoing loans")
+  
+```
+
+
+```{r}
+loan <- loan |>
+  mutate(active= if_else(status %in% c("A","B"),"Past","Active"))
+```
+
+
+```{r}
+ggplot(loan, aes(x=status)) + 
+         geom_bar() + 
+         facet_wrap(~active, scales = "free")
+```
+
+```{r}
+ggplot(loan, aes(y=active, fill = status)) + 
+  geom_bar(position = "fill")
+```
+
+```{r}
+loan <- loan |>
+  mutate(default = status %in% c("B", "D"))
+```
+
+```{r}
+ggplot(loan, aes(y=active, fill = default)) + 
+  geom_bar(position = "fill")
+```
+
+### Combined analysis 
+```{r}
+loan_cda <- loan |> 
+  inner_join(cda, by = join_by(account_id), suffix = c("_loan","_account"))
+```
+
+
+By doing that we only have the loan_id and the nb of clients. Dplyr do not know that loan_id is a key in the original loan data frame i.e that for a given loan.id every info will be the same.We are trying to see the link between the nb fo person associated to an account and the status of the loan.Here, we see that when two persons are associated to the loan the proba of default is 0. But maybe this is due to a selection effect.
+```{r}
+loan_cda |> 
+  group_by(loan_id) |>
+  mutate(nb_clients = n()) |>     
+  slice_head() |>               #                           
+  select(-client_id, -gender, -birth_date) |>  #this removes the select data hence the minus
+  ungroup() |>
+  ggplot(aes(y=nb_clients, fill=default)) +
+  geom_bar()
+```
+Let's study the selection process effect i.e we want to see the accounts that are not in loan_cda so basically clients that do not have a loan.  
+```{r}
+clients_without_loan <- cda |> 
+  anti_join(loan, by = join_by(account_id))
+clients_with_loan <- cda |>
+  semi_join(loan, by= join_by(account_id))
+```
+
+```{r}
+(clients_without_loan |> 
+  group_by(account_id) |>
+  summarise(nb_clients = n()) |>
+  ggplot(aes(y=nb_clients)) + 
+  geom_bar() + ggtitle("Without loan")) /    #here if you put + you have the representation side by    side, if you put / you have a representation over an another one, if you put nothing you have two distinct graph 
+(clients_with_loan |> 
+  group_by(account_id) |>
+  summarise(nb_clients = n()) |>
+  ggplot(aes(y=nb_clients)) + 
+  geom_bar() + ggtitle("With loan"))
+```
+
+```{r}
+merged_clients <-
+  bind_rows(
+    with_loan = clients_with_loan,
+    without_loan = clients_without_loan,
+    .id = "loan"          #here we add a new col called loan that contains the two 
+  )
+```
+
+
+We want the % of loan among the difference users of the accounts. So we see that the nb of clients is not very much dependants of wheter you have a loan or not. 
+```{r}
+merged_clients |>
+  group_by(account_id) |>
+  mutate(nb_clients = n()) |>
+  slice_head() |> 
+  ungroup () |>
+  ggplot(aes(y=nb_clients, fill=loan)) +
+  geom_bar(position = "fill")
+```
+
+```{r}
+accounts_loan <- merged_clients |>
+  group_by(account_id) |>
+  mutate(nb_clients = n()) |>
+  slice_head() |> 
+  ungroup () 
+chisq.test(accounts_loan |>pull(loan),
+           accounts_loan |>pull(nb_clients))
+```
+### Alternative solutions 
+```{r}
+persons_per_accounts <- cda |>
+  count(account_id)
+loan |> inner_join(persons_per_accounts, by=join_by(account_id))
+```
+
+```{r}
+loan_cda |>
+  group_by(default, loan_id) |>
+  summarise(n=n(), .groups="drop")
+```
+
+
+
+```{r}
+cda |> 
+  left_join(loan|>select(account_id, default), by=join_by(account_id)) |>
+  mutate(loan = if_else(is.na(default), "Without","With"))
 ```
 
